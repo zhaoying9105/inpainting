@@ -1,4 +1,10 @@
 # inpainting
+
+本项目为 Edward-Lin 的 [inpainting](https://github.com/Edward-Lin/inpainting) 项目增加中文文档
+其中每个 `*.py`文件都有同名的`*.md`进行解释
+
+以下是远项目说明
+---
 Another Implementation of "Context Encoders: Feature Learning by Inpainting"
 
 Use convert_image.py to convert all jpg images in a folder into one or more binary files, which will use for training or validating or testing.
