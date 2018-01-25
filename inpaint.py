@@ -1,9 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import os
-import thread
+import _thread
 import tensorflow as tf
 import numpy as np
 from utils import save
@@ -235,10 +235,10 @@ psnr: %.8f, ssim: %.8f' % (rec_loss_value, adv_gene_loss_value,
           writer.add_summary(summary, counter)
 
         if epoch % FLAGS.ckpt == 0 and index == 0:
-          thread.start_new_thread(
+          _thread.start_new_thread(
               save, (sess, saver, CHECKPOINT_DIR, counter,))
 
-        for _ in xrange(FLAGS.disc_iter):
+        for _ in range(FLAGS.disc_iter):
           _ = sess.run(
               disc_train_op,
               feed_dict={
@@ -246,7 +246,7 @@ psnr: %.8f, ssim: %.8f' % (rec_loss_value, adv_gene_loss_value,
                   hidden_image_holder: hidden_image_batch
               })
 
-        for _ in xrange(FLAGS.gene_iter):
+        for _ in range(FLAGS.gene_iter):
           _, rec_loss_value, adv_gene_loss_value, adv_disc_loss_value, disc_acc_value = sess.run(
               [gene_train_op, rec_loss, adv_gene_loss, adv_disc_loss, disc_acc],
               feed_dict={

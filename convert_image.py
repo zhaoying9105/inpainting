@@ -12,15 +12,15 @@ def display_bin():
   #file_object = open('data/' + DATASET_NAME + '_test.bin', 'rb')
   images = np.fromfile(file_object, dtype=np.uint8)
   images = np.reshape(images, (-1, IMAGE_SIZE, IMAGE_SIZE, IMAGE_CHANNEL))
-  print images.shape
+  print(images.shape)
   plt.figure('image')
-  print images[0].shape
+  print(images[0].shape)
   if IMAGE_CHANNEL == 1:
     plt.imshow(images[100, :, :, 0], cmap='gray')
   elif IMAGE_CHANNEL == 3:
     plt.imshow(images[10])
   else:
-    print 'image channel not supported'
+    print('image channel not supported')
   plt.show()
 
 
@@ -29,7 +29,7 @@ def convert_to_bin():
   path_pattern = dataset_path + '*.jpg'
   images = np.array(io.ImageCollection(path_pattern))
   np.random.shuffle(images)
-  print images.shape
+  print(images.shape)
   num = images.shape[0]
   train_num = num * 4 / 5
   image_train = images[:train_num]

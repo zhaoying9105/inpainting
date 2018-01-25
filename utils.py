@@ -17,17 +17,17 @@ def save(sess, saver, checkpoint_dir, step):
 
 def load(sess, saver, checkpoint_dir):
   import re
-  print ' [*] Reading checkpoints...'
+  print(' [*] Reading checkpoints...')
 
   ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
   if ckpt and ckpt.model_checkpoint_path:
     ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
     saver.restore(sess, os.path.join(checkpoint_dir, ckpt_name))
     counter = int(next(re.finditer("([0-9]+)(?!.*[0-9])", ckpt_name)).group(0))
-    print " [*] Success to read {}".format(ckpt_name)
+    print(" [*] Success to read {}".format(ckpt_name))
     return True, counter
   else:
-    print ' [*] Failed to find a checkpoint'
+    print(' [*] Failed to find a checkpoint')
     return False, 0
 
 
@@ -155,7 +155,7 @@ def compute_psnr_ssim(images1, images2):
   batch_size = np.shape(images1)[0]
   psnr = np.zeros((batch_size))
   ssim = np.zeros((batch_size))
-  for idx in xrange(batch_size):
+  for idx in range(batch_size):
     psnr[idx] = compare_psnr(images1[idx], images2[idx])
     ssim[idx] = compare_ssim(images1[idx], images2[idx], multichannel=True)
 
@@ -171,7 +171,7 @@ def extend_array_by_index(inputs, index, full_height, full_width=None):
   """
   shape = inputs.get_shape().as_list()
   if index.get_shape().as_list()[0] != shape[0]:
-    raise 'Inputs tensor shape[0] doesnot match index shape[0]'
+    raise 'Inputs tensor shape[0] does not match index shape[0]'
 
   batch_size = shape[0]
   height = shape[1]
@@ -182,7 +182,7 @@ def extend_array_by_index(inputs, index, full_height, full_width=None):
     full_width = full_height
 
   indices = None
-  for idx in xrange(batch_size):
+  for idx in range(batch_size):
     idx_start1 = tf.cast(index[idx, 0], tf.int32)
     idx_end1 = tf.cast(index[idx, 0] + height, tf.int32)
     idx_start2 = tf.cast(index[idx, 1], tf.int32)
