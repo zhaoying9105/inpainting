@@ -1,0 +1,16 @@
+dataname:inpaint
+block:random
+learning_rate:0.000200
+lamb_rec:0.999000
+lamb_adv:0.001000
+lamb_tv:0.000001
+use_l1:False
+weight_clip:False
+image_size:128
+image_channel:1
+start_epoch: 0
+epoch: 100
+batch_size: 64
+gene_iter: 5
+disc_iter: 1
+

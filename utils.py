@@ -3,9 +3,11 @@ import math
 import numpy as np
 import tensorflow as tf
 from PIL import Image
+import itertools
+from glob import glob
 from skimage.measure import compare_psnr
 from skimage.measure import compare_ssim
-
+from skimage.io import imread
 
 def save(sess, saver, checkpoint_dir, step):
   model_name = "model"
@@ -30,6 +32,25 @@ def load(sess, saver, checkpoint_dir):
     print(' [*] Failed to find a checkpoint')
     return False, 0
 
+SUPPORTED_EXTENSIONS = ["png", "jpg", "jpeg"]
+def dataset_files(root):
+    return list(itertools.chain.from_iterable(
+        glob(os.path.join(root, "*.{}".format(ext))) for ext in SUPPORTED_EXTENSIONS))
+
+def read_batch_image(file_list, batch_size):
+  lenght = len(file_list)
+  print('lenght: ',lenght)
+  indices = np.arange(lenght)
+  np.random.shuffle(indices)
+  for i in range(lenght // batch_size):
+    images = []
+    for index in range(i*batch_size,(i+1)*batch_size):
+      image = imread(file_list[index],mode='RGB').astype(np.float)
+      if image.shape != (64,64,3):
+        print(file_list[i])
+      else:
+        images.append(image)
+    yield np.array(images)
 
 def read_by_batch(file_object, batch_size, data_shape, label=False):
   """
@@ -64,60 +85,23 @@ def read_by_batch(file_object, batch_size, data_shape, label=False):
 
 """
 def preprocess_image(images, batch_size, image_size,
-                     hidden_size, image_dim):  # single central blocks
-  masks_idx = [(image_size - hidden_size) / 2, (image_size + hidden_size) / 2]
-  masks = np.ones((batch_size, image_size, image_size, image_dim))
-  hiding_images = np.zeros((batch_size, hidden_size, hidden_size, image_dim))
-
-  masks[:, masks_idx[0]:masks_idx[1], masks_idx[0]:masks_idx[1], :] = 0
-  hiding_images = np.copy(
-      images[:, masks_idx[0]:masks_idx[1], masks_idx[0]:masks_idx[1], :])
-  masked_images = np.multiply(images, masks)
-  return masked_images, hiding_images, masks_idx
+                      image_dim):  # single central blocks
 """
+def preprocess_image(images, batch_size, image_size, 
+                     image_dim,random_block=True, mask_percent=0.25):  # single random blocks
 
-
-def preprocess_image(images, batch_size, image_size, hidden_size,
-                     image_dim, random_block=True, target_image=None):  # single random blocks
-  masks = np.ones((batch_size, image_size, image_size,
-                   image_dim), dtype=np.float32)
-  hiding_images = np.zeros(
-      (batch_size, hidden_size, hidden_size, image_dim), dtype=np.float32)
-  masks_idx = None
   if random_block:
-    masks_idx = np.random.randint(0, hidden_size, (batch_size, 2), np.int)
-    for idx in range(batch_size):
-      idx_start1 = int(masks_idx[idx, 0])
-      idx_end1 = int(masks_idx[idx, 0] + (hidden_size))
-      idx_start2 = int(masks_idx[idx, 1])
-      idx_end2 = int(masks_idx[idx, 1] + (hidden_size))
-      masks[idx, idx_start1: idx_end1, idx_start2: idx_end2, :] = 0
-      hiding_images[idx] = np.copy(
-          images[idx, idx_start1: idx_end1, idx_start2: idx_end2, :])
+    masks = np.random.choice([0,1],size=(batch_size, image_size, image_size,
+                   image_dim),p=[mask_percent,1-mask_percent])
   else:
-    masks_idx = [(image_size - hidden_size) / 2,
-                 (image_size - hidden_size) / 2]
-    masks[:, masks_idx[0]:masks_idx[0] + hidden_size,
-          masks_idx[1]:masks_idx[1] + hidden_size, :] = 0
-    hiding_images = np.copy(images[:, masks_idx[0]:masks_idx[0] + hidden_size,
-                                   masks_idx[1]:masks_idx[1] + hidden_size, :])
-    #masks_idx = np.reshape(masks_idx, (1, 2))
-    masks_idx = np.tile(masks_idx, (batch_size, 1))
-
+    masks = np.ones((batch_size, image_size, image_size,
+                   image_dim), dtype=np.float32)
+    masks[:, int(image_size * 0.25):int(image_size * 0.75),
+          int(image_size * 0.25):int(image_size * 0.75), :] = 0
   masked_images = np.multiply(images, masks)
-
-  if target_image is not None:
-    target_image = np.reshape(
-        target_image, (batch_size, hidden_size, hidden_size, image_dim))
-    for idx in range(batch_size):
-      idx_start1 = int(masks_idx[idx, 0])
-      idx_end1 = int(masks_idx[idx, 0] + (hidden_size))
-      idx_start2 = int(masks_idx[idx, 1])
-      idx_end2 = int(masks_idx[idx, 1] + (hidden_size))
-      masked_images[idx, idx_start1: idx_end1, idx_start2: idx_end2, :] = np.copy(
-          target_image[idx, :, :, :])
-
-  return masked_images, hiding_images, masks_idx
+  print('masks shape: ',masks.shape)
+  print('images shape: ',images.shape)
+  return masked_images,images,masks
 
 
 def combine_images(images):

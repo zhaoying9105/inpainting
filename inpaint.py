@@ -8,16 +8,17 @@ import tensorflow as tf
 import numpy as np
 from utils import save
 from utils import load
-from utils import read_by_batch
+from utils import read_batch_image
 from utils import preprocess_image
 from utils import save_images
+from utils import dataset_files
 from utils import compute_psnr_ssim
 
 FLAG = tf.app.flags
 FLAGS = FLAG.FLAGS
-FLAG.DEFINE_string('dataname', 'inpaint', 'The dataset name')
+FLAG.DEFINE_string('dataDir', 'image', 'The dataset name')
 FLAG.DEFINE_string('mode', 'train', 'Chose mode from (train, validate, test)')
-FLAG.DEFINE_string('block', 'random', 'Block location, chose from (center, random)')
+FLAG.DEFINE_string('block', 'center', 'Block location, chose from (center, random)')
 FLAG.DEFINE_float('learning_rate', 0.0002, 'Initial learning rate.')
 FLAG.DEFINE_float('lamb_rec', 0.999, 'Weight for reconstruct loss.')
 FLAG.DEFINE_float('lamb_adv', 0.001, 'Weight for adversarial loss.')
@@ -26,8 +27,8 @@ FLAG.DEFINE_boolean('use_l1', False,
                     'If True, use L1 distance for rec_loss, else use L2 distance')
 FLAG.DEFINE_boolean('weight_clip', False,
                     'When updating G & D, clip weights or not.')
-FLAG.DEFINE_integer('image_size', 128, 'Image size.')
-FLAG.DEFINE_integer('image_channel', 1,
+FLAG.DEFINE_integer('image_size', 64, 'Image size.')
+FLAG.DEFINE_integer('image_channel', 3,
                     'Image channel, grayscale should be 1 and RGB should be 3')
 FLAG.DEFINE_integer('start_epoch', 0, 'Number of epochs the trainer will run.')
 FLAG.DEFINE_integer('epoch', 100, 'Number of epochs the trainer will run.')
@@ -57,21 +58,23 @@ else:
 BATCH_SIZE = FLAGS.batch_size
 IMAGE_SIZE = FLAGS.image_size
 IMAGE_CHANNEL = FLAGS.image_channel
-HIDDEN_SIZE = int(IMAGE_SIZE / 2)
 
 if IMAGE_SIZE == 128:
   from model_inpaint128 import generator
   from model_inpaint128 import discriminator
+elif IMAGE_SIZE == 64:
+  from model_inpaint64 import generator
+  from model_inpaint64 import discriminator
 else:
   print('image_size not supported, process terminated.')
   exit()
 
-DATANAME = FLAGS.dataname + str(IMAGE_SIZE)
-DATA_PATH = os.path.join('data', DATANAME + '_' + FLAGS.mode + '.bin')
-CHECKPOINT_DIR = os.path.join('checkpoints', DATANAME, 'gpu' + str(FLAGS.gpu))
-LOG_DIR = os.path.join('logs', DATANAME, 'gpu' + str(FLAGS.gpu))
+dataDir = FLAGS.dataDir
+DATA_PATH = os.path.join(dataDir, FLAGS.mode)
+CHECKPOINT_DIR = os.path.join('checkpoints', dataDir, 'gpu' + str(FLAGS.gpu))
+LOG_DIR = os.path.join('logs', dataDir, 'gpu' + str(FLAGS.gpu))
 SAMPLE_DIR = os.path.join(
-    'samples', DATANAME, 'gpu' + str(FLAGS.gpu), FLAGS.mode)
+    'samples', dataDir, 'gpu' + str(FLAGS.gpu), FLAGS.mode)
 
 BETA1 = 0.5
 BETA2 = 0.9
@@ -84,13 +87,13 @@ WEIGHT_DECAY_RATE = 0.00001
 def run_model(sess):
   masked_image_holder = tf.placeholder(tf.float32, [
       BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, IMAGE_CHANNEL], name='masked_image')
-  hidden_image_holder = tf.placeholder(tf.float32, [
-      BATCH_SIZE, HIDDEN_SIZE, HIDDEN_SIZE, IMAGE_CHANNEL], name='hidden_image')
+  real_image_holder = tf.placeholder(tf.float32, [
+      BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE, IMAGE_CHANNEL], name='hidden_image')
 
   fake_image = generator(masked_image_holder, BATCH_SIZE,
                          IMAGE_CHANNEL, is_train=TRAIN, no_reuse=True)
   adv_real_score = discriminator(
-      hidden_image_holder, BATCH_SIZE, is_train=TRAIN)
+      real_image_holder, BATCH_SIZE, is_train=TRAIN)
   adv_fake_score = discriminator(
       fake_image, BATCH_SIZE, reuse=True, is_train=TRAIN)
   adv_all_score = tf.concat([adv_real_score, adv_fake_score], axis=0)
@@ -106,10 +109,10 @@ def run_model(sess):
 
   if FLAGS.use_l1:
     rec_loss = tf.reduce_mean(
-        tf.abs(tf.subtract(hidden_image_holder, fake_image)))
+        tf.abs(tf.subtract(real_image_holder, fake_image)))
   else:
     rec_loss = tf.reduce_mean(
-        tf.squared_difference(hidden_image_holder, fake_image))
+        tf.squared_difference(real_image_holder, fake_image))
 
   adv_disc_loss = tf.reduce_mean(
       tf.nn.sigmoid_cross_entropy_with_logits(
@@ -185,41 +188,38 @@ def run_model(sess):
       index = 0
       losses = np.zeros(4)
       loss_file = open(os.path.join(LOG_DIR, 'loss_log.txt'), 'a+')
-      file_object = open(DATA_PATH, 'rb')
+      # file_object = open(DATA_PATH, 'rb')
+      file_list = dataset_files(DATA_PATH)
       print('Current Epoch is: ' + str(epoch))
-      for image_batch in read_by_batch(
-              file_object, BATCH_SIZE, [IMAGE_SIZE, IMAGE_SIZE, IMAGE_CHANNEL]):
+      for image_batch in read_batch_image(
+              file_list, BATCH_SIZE,):
         if image_batch.shape[0] != BATCH_SIZE:
           break
         image_batch = (image_batch.astype(np.float32) - 127.5) / 127.5
         if FLAGS.block == 'center':
-          masked_image_batch, hidden_image_batch, masks_idx = preprocess_image(
-              image_batch, BATCH_SIZE, IMAGE_SIZE, HIDDEN_SIZE, IMAGE_CHANNEL, False)
+          masked_image_batch, real_image_batch, masks_idx = preprocess_image(
+              image_batch, BATCH_SIZE, IMAGE_SIZE, IMAGE_CHANNEL, False)
         else:
-          masked_image_batch, hidden_image_batch, masks_idx = preprocess_image(
-              image_batch, BATCH_SIZE, IMAGE_SIZE, HIDDEN_SIZE, IMAGE_CHANNEL)
+          masked_image_batch, real_image_batch, masks_idx = preprocess_image(
+              image_batch, BATCH_SIZE, IMAGE_SIZE, IMAGE_CHANNEL)
 
         if epoch % FLAGS.sample == 0 and index == 0:
           samples, rec_loss_value, adv_gene_loss_value, adv_disc_loss_value = sess.run(
               [sampler, rec_loss, adv_gene_loss, adv_disc_loss],
               feed_dict={
                   masked_image_holder: masked_image_batch,
-                  hidden_image_holder: hidden_image_batch
+                  real_image_holder: real_image_batch
               })
-          inpaint_image = np.copy(masked_image_batch)
-          for idx in range(FLAGS.batch_size):
-            idx_start1 = int(masks_idx[idx, 0])
-            idx_end1 = int(masks_idx[idx, 0] + (HIDDEN_SIZE))
-            idx_start2 = int(masks_idx[idx, 1])
-            idx_end2 = int(masks_idx[idx, 1] + (HIDDEN_SIZE))
-            inpaint_image[idx, idx_start1: idx_end1,
-                          idx_start2: idx_end2, :] = samples[idx, :, :, :]
-
+          # inpaint_image = np.copy(masked_image_batch)
+          # 0 ->1  and 1->0
+          reve_masks_idx = masks_idx * (-1) + 1
+          inpaint_image = np.add(np.multiply(reve_masks_idx,samples),masked_image_batch)
+          print('inpaint_image shape： ',inpaint_image.shape)
           save_images(image_batch, epoch, index, SAMPLE_DIR)
           save_images(inpaint_image, epoch, index + 1, SAMPLE_DIR)
           save_images(masked_image_batch, epoch, index + 2, SAMPLE_DIR)
 
-          psnr, ssim = compute_psnr_ssim(hidden_image_batch, samples)
+          psnr, ssim = compute_psnr_ssim(real_image_batch, samples)
           # psnr, ssim = compute_psnr_ssim(image_batch, inpaint_image)
           print('[Getting Sample...] rec_loss:%.8f, gene_loss: %.8f, disc_loss: %.8f, \
 psnr: %.8f, ssim: %.8f' % (rec_loss_value, adv_gene_loss_value,
@@ -230,7 +230,7 @@ psnr: %.8f, ssim: %.8f' % (rec_loss_value, adv_gene_loss_value,
               merged,
               feed_dict={
                   masked_image_holder: masked_image_batch,
-                  hidden_image_holder: hidden_image_batch
+                  real_image_holder: real_image_batch
               })
           writer.add_summary(summary, counter)
 
@@ -243,7 +243,7 @@ psnr: %.8f, ssim: %.8f' % (rec_loss_value, adv_gene_loss_value,
               disc_train_op,
               feed_dict={
                   masked_image_holder: masked_image_batch,
-                  hidden_image_holder: hidden_image_batch
+                  real_image_holder: real_image_batch
               })
 
         for _ in range(FLAGS.gene_iter):
@@ -251,7 +251,7 @@ psnr: %.8f, ssim: %.8f' % (rec_loss_value, adv_gene_loss_value,
               [gene_train_op, rec_loss, adv_gene_loss, adv_disc_loss, disc_acc],
               feed_dict={
                   masked_image_holder: masked_image_batch,
-                  hidden_image_holder: hidden_image_batch
+                  real_image_holder: real_image_batch
               })
 
         print('Epoch:%4d Batch:%4d, rec_loss:%2.8f, gene_loss: %2.8f, \
@@ -271,38 +271,38 @@ disc_loss: %2.8f, disc_acc: %2.8f' % (epoch, index, rec_loss_value, adv_gene_los
   else:  # VALIDATE or TEST
     index = 0
     values = np.zeros(6)
-    file_object = open(DATA_PATH, 'rb')
-    for image_batch in read_by_batch(
-            file_object, BATCH_SIZE, [IMAGE_SIZE, IMAGE_SIZE, IMAGE_CHANNEL]):
+    # file_object = open(DATA_PATH, 'rb')
+    file_list = dataset_files(DATA_PATH)
+    for image_batch in read_by_batch(file_list, BATCH_SIZE):
       if image_batch.shape[0] != BATCH_SIZE:
         break
       image_batch = (image_batch.astype(np.float32) - 127.5) / 127.5
       if FLAGS.block == 'center':
-        masked_image_batch, hidden_image_batch, masks_idx = preprocess_image(
-            image_batch, BATCH_SIZE, IMAGE_SIZE, HIDDEN_SIZE, IMAGE_CHANNEL, False)
+        masked_image_batch, real_image_batch, masks_idx = preprocess_image(
+            image_batch, BATCH_SIZE, IMAGE_SIZE,  IMAGE_CHANNEL,random_block=False)
       else:
-        masked_image_batch, hidden_image_batch, masks_idx = preprocess_image(
-            image_batch, BATCH_SIZE, IMAGE_SIZE, HIDDEN_SIZE, IMAGE_CHANNEL)
+        masked_image_batch, real_image_batch, masks_idx = preprocess_image(
+            image_batch, BATCH_SIZE, IMAGE_SIZE, IMAGE_CHANNEL)
 
       samples, rec_loss_value, adv_gene_loss_value, adv_disc_loss_value, disc_acc_value = sess.run(
           [sampler, rec_loss, adv_gene_loss, adv_disc_loss, disc_acc],
           feed_dict={
               masked_image_holder: masked_image_batch,
-              hidden_image_holder: hidden_image_batch
+              real_image_holder: real_image_batch
           })
       inpaint_image = np.copy(masked_image_batch)
       for idx in range(FLAGS.batch_size):
         idx_start1 = int(masks_idx[idx, 0])
-        idx_end1 = int(masks_idx[idx, 0] + HIDDEN_SIZE)
+        idx_end1 = int(masks_idx[idx, 0] + IMAGE_SIZE)
         idx_start2 = int(masks_idx[idx, 1])
-        idx_end2 = int(masks_idx[idx, 1] + HIDDEN_SIZE)
+        idx_end2 = int(masks_idx[idx, 1] + IMAGE_SIZE)
         inpaint_image[idx, idx_start1: idx_end1,
                       idx_start2: idx_end2, :] = samples[idx, :, :, :]
       save_images(image_batch, index, 0, SAMPLE_DIR)
       save_images(inpaint_image, index, 1, SAMPLE_DIR)
       save_images(masked_image_batch, index, 2, SAMPLE_DIR)
 
-      psnr, ssim = compute_psnr_ssim(hidden_image_batch, samples)
+      psnr, ssim = compute_psnr_ssim(real_image_batch, samples)
       # psnr, ssim = compute_psnr_ssim(image_batch, inpaint_image)
       print('[Getting Sample...] rec_loss:%2.8f, gene_loss: %2.8f, disc_loss: %2.8f, \
 disc_acc: %2.8f, psnr: %2.8f, ssim: %2.8f' % (rec_loss_value, adv_gene_loss_value,
@@ -322,7 +322,7 @@ psnr: %2.8f, ssim: %2.8f' % (values[0], values[1], values[2], values[3], values[
 def save_configs():
   config_file = open(os.path.join(CHECKPOINT_DIR, 'configs.txt'), 'a+')
   config_file.write('\
-dataname:%s\n\
+dataDir:%s\n\
 block:%s\n\
 learning_rate:%f\n\
 lamb_rec:%f\n\
@@ -336,7 +336,7 @@ start_epoch: %d\n\
 epoch: %d\n\
 batch_size: %d\n\
 gene_iter: %d\n\
-disc_iter: %d\n\n' % (FLAGS.dataname, FLAGS.block, FLAGS.learning_rate, FLAGS.lamb_rec,
+disc_iter: %d\n\n' % (FLAGS.dataDir, FLAGS.block, FLAGS.learning_rate, FLAGS.lamb_rec,
                       FLAGS.lamb_adv, FLAGS.lamb_tv, str(FLAGS.use_l1),
                       str(FLAGS.weight_clip), FLAGS.image_size, FLAGS.image_channel,
                       FLAGS.start_epoch, FLAGS.epoch, FLAGS.batch_size, FLAGS.gene_iter,
@@ -344,7 +344,7 @@ disc_iter: %d\n\n' % (FLAGS.dataname, FLAGS.block, FLAGS.learning_rate, FLAGS.la
 
 
 def print_args():
-  print('dataname is:      ' + str(FLAGS.dataname))
+  print('dataDir is:      ' + str(FLAGS.dataDir))
   print('learning_rate is: ' + str(FLAGS.learning_rate))
   print('lamb_rec is:      ' + str(FLAGS.lamb_rec))
   print('lamb_adv is:      ' + str(FLAGS.lamb_adv))
